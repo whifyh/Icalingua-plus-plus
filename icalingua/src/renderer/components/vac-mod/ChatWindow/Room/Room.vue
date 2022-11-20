@@ -64,9 +64,9 @@
                             v-if="
                                 messages.length &&
                                 optimizeMethod === 'infinite-loading' &&
-                                !(messagesLoaded && visiableViewport.head === 0)
+                                !(messagesLoaded && visibleViewport.head === 0)
                             "
-                            :class="{ 'vac-infinite-loading': !(messagesLoaded && visiableViewport.head === 0) }"
+                            :class="{ 'vac-infinite-loading': !(messagesLoaded && visibleViewport.head === 0) }"
                             spinner="spiral"
                             direction="top"
                             :distance="40"
@@ -81,14 +81,14 @@
                     </transition>
                     <transition-group :key="roomId" name="vac-fade-message">
                         <div
-                            v-for="(m, i) in messages.slice(visiableViewport.head, visiableViewport.tail)"
+                            v-for="(m, i) in messages.slice(visibleViewport.head, visibleViewport.tail)"
                             :key="m._id"
                             @dblclick="replyMessage(m, $event)"
                         >
                             <message
                                 :current-user-id="currentUserId"
                                 :message="m"
-                                :index="i + visiableViewport.head"
+                                :index="i + visibleViewport.head"
                                 :messages="messages"
                                 :edited-message="editedMessage"
                                 :message-actions="messageActions"
@@ -116,6 +116,7 @@
                                 @add-msg-to-forward="addMsgtoForward"
                                 @del-msg-to-forward="delMsgtoForward"
                                 @scroll-to-message="scrollToMessage"
+                                :hide-chat-image-by-default="hideChatImageByDefault"
                             >
                                 <template v-for="(index, name) in $scopedSlots" #[name]="data">
                                     <slot :name="name" v-bind="data" />
@@ -125,8 +126,8 @@
                     </transition-group>
                     <transition name="vac-fade-message">
                         <infinite-loading
-                            v-if="visiableViewport.tail !== messages.length && optimizeMethod === 'infinite-loading'"
-                            :class="{ 'vac-infinite-loading': visiableViewport.tail !== messages.length }"
+                            v-if="visibleViewport.tail !== messages.length && optimizeMethod === 'infinite-loading'"
+                            :class="{ 'vac-infinite-loading-bottom': visibleViewport.tail !== messages.length }"
                             spinner="spiral"
                             direction="bottom"
                             :distance="100"
@@ -144,8 +145,20 @@
         </div>
         <div v-if="!loadingMessages">
             <transition name="vac-bounce">
+                <div v-if="lastUnreadCount >= 10" class="vac-icon-last-message" @click="scrollToLastMessage">
+                    <transition name="vac-bounce">
+                        <div v-if="lastUnreadCount" class="vac-badge-counter vac-messages-count">
+                            {{ lastUnreadCount }}
+                        </div>
+                    </transition>
+                    <slot name="scroll-icon">
+                        <svg-icon name="dropdown" style="transform: rotate(180deg)" />
+                    </slot>
+                </div>
+            </transition>
+            <transition name="vac-bounce">
                 <div
-                    v-if="scrollIcon || (visiableViewport.tail !== messages.length && messages.length !== 0)"
+                    v-if="scrollIcon || (visibleViewport.tail !== messages.length && messages.length !== 0)"
                     class="vac-icon-scroll"
                     @click="scrollToBottom"
                 >
@@ -425,6 +438,8 @@ export default {
         account: { type: Number, required: true },
         username: { type: String, required: true },
         forwardResId: { type: String, required: false },
+        hideChatImageByDefault: { type: Boolean, required: false, default: false },
+        lastUnreadCount: { type: Number, required: false, default: 0 },
     },
     data() {
         return {
@@ -455,7 +470,7 @@ export default {
             groupMembers: null,
             useAtKey: false,
             selectedMessage: '',
-            visiableViewport: {
+            visibleViewport: {
                 head: 0,
                 tail: 0,
             },
@@ -469,6 +484,7 @@ export default {
                 tail: null,
             },
             optimizeMethod: 'infinite-loading',
+            scrollingTolastMessage: 0,
         }
     },
     computed: {
@@ -483,7 +499,7 @@ export default {
             return this.room.roomId && !this.messages.length && !this.loadingMessages && !this.loadingRooms
         },
         showMessagesStarted() {
-            return this.messages.length && this.messagesLoaded && this.visiableViewport.head === 0
+            return this.messages.length && this.messagesLoaded && this.visibleViewport.head === 0
         },
         isMessageEmpty() {
             return !this.file && !this.message.trim()
@@ -504,11 +520,16 @@ export default {
                 this.loadingMessages = true
                 this.scrollIcon = false
                 this.scrollMessagesCount = 0
+                this.scrollingTolastMessage = 0
                 //this.resetMessage(true)
 
                 this.editAndResend = false
                 this.closeForwardPanel()
                 await this.updateGroupMembers()
+            } else if (newVal.roomId === 0) {
+                this.scrollIcon = false
+                this.scrollMessagesCount = 0
+                this.scrollingTolastMessage = 0
             }
         },
         messages(newVal, oldVal) {
@@ -526,19 +547,19 @@ export default {
                 const scrollTop = this.getTopScroll(element)
                 const scrollBottom = this.getBottomScroll(element)
                 if (scrollTop < scrollBottom) {
-                    this.visiableViewport.tail = Math.min(
+                    this.visibleViewport.tail = Math.min(
                         newVal.length,
-                        this.visiableViewport.head + this.maxViewportLength,
+                        this.visibleViewport.head + this.maxViewportLength,
                     )
                 }
                 if (scrollTop > scrollBottom) {
-                    this.visiableViewport.tail = Math.min(newVal.length, this.visiableViewport.tail + offset)
-                    this.visiableViewport.head = Math.max(0, this.visiableViewport.tail - this.maxViewportLength)
+                    this.visibleViewport.tail = Math.min(newVal.length, this.visibleViewport.tail + offset)
+                    this.visibleViewport.head = Math.max(0, this.visibleViewport.tail - this.maxViewportLength)
                 }
             }
             if (!oldVal || !oldVal.length || this.optimizeMethod === 'none') {
-                this.visiableViewport.head = 0
-                this.visiableViewport.tail = newVal.length
+                this.visibleViewport.head = 0
+                this.visibleViewport.tail = newVal.length
             }
 
             if (oldVal && newVal && oldVal.length === newVal.length - 1) {
@@ -547,11 +568,11 @@ export default {
                 if (
                     newVal[newVal.length - 1].senderId === this.currentUserId ||
                     (this.getBottomScroll(element) < 60 &&
-                        (this.visiableViewport.tail === oldVal.length || this.optimizeMethod === 'none'))
+                        (this.visibleViewport.tail === oldVal.length || this.optimizeMethod === 'none'))
                 ) {
                     if (this.optimizeMethod !== 'none') {
-                        this.visiableViewport.tail = newVal.length
-                        this.visiableViewport.head = newVal.length - this.maxViewportLength
+                        this.visibleViewport.tail = newVal.length
+                        this.visibleViewport.head = Math.max(0, this.visibleViewport.tail - this.maxViewportLength)
                     }
                     return setTimeout(() => {
                         const options = { top: element.scrollHeight, behavior: 'smooth' }
@@ -571,7 +592,20 @@ export default {
                     this.loadingMessages = false
                 }, 0)
             }
-
+            if (this.scrollingTolastMessage && newVal.length >= this.scrollingTolastMessage) {
+                const msgCount = this.scrollingTolastMessage
+                this.scrollingTolastMessage = 0
+                setTimeout(() => {
+                    const nonSystemMessages = newVal.filter((msg) => !msg.system)
+                    const _id = nonSystemMessages[nonSystemMessages.length - msgCount]._id
+                    if (!_id) {
+                        this.$message.error('Message not found')
+                        return
+                    }
+                    console.log('last unread message ID', _id)
+                    this.scrollToMessage(_id)
+                }, 0)
+            }
             setTimeout(() => (this.loadingHeadMessages = false), 0)
         },
         messagesLoaded(val) {
@@ -717,6 +751,10 @@ export default {
             this.onPasteGif(GifURL)
             this.$emit('stickers-panel')
         })
+        this.hideChatImageByDefault = await ipc.getHideChatImageByDefault()
+        ipcRenderer.on('setHideChatImageByDefault', (_, hideChatImageByDefault) => {
+            this.hideChatImageByDefault = hideChatImageByDefault
+        })
     },
     methods: {
         sendForward(target, name) {
@@ -797,12 +835,29 @@ export default {
             console.log('delMsgtoForward')
         },
         scrollToMessage(messageId) {
+            const judgeSameMessage = (a, b) => {
+                if (a === b) return true
+                const parsedA = Buffer.from(a, 'base64')
+                const parsedB = Buffer.from(b, 'base64')
+                if (this.roomId < 0) {
+                    for (let i = 0; i <= 16; i += 4) {
+                        if (i !== 12 && parsedA.readUInt32BE(i) !== parsedB.readUInt32BE(i)) return false
+                    }
+                    if (parsedA.readUInt8(20) !== parsedB.readUInt8(20)) return false
+                } else {
+                    for (let i = 0; i <= 12; i += 4) {
+                        if (i !== 8 && parsedA.readUInt32BE(i) !== parsedB.readUInt32BE(i)) return false
+                    }
+                    if (parsedA.readUInt8(16) !== parsedB.readUInt8(16)) return false
+                }
+                return true
+            }
             const message = document.getElementById(messageId)
             if (message) {
                 message.scrollIntoView({ behavior: 'smooth' })
                 return
             } else {
-                const index = this.messages.findIndex((e) => e._id === messageId)
+                const index = this.messages.findIndex((e) => judgeSameMessage(e._id, messageId))
                 if (index !== -1) {
                     let head = index - Math.floor(this.maxViewportLength / 2)
                     let tail = head + this.maxViewportLength
@@ -815,11 +870,11 @@ export default {
                         head = Math.max(tail - this.maxViewportLength, 0)
                     }
                     if (this.optimizeMethod !== 'none') {
-                        this.visiableViewport.head = head
-                        this.visiableViewport.tail = tail
+                        this.visibleViewport.head = head
+                        this.visibleViewport.tail = tail
                     }
                     this.$nextTick(() => {
-                        const message = document.getElementById(messageId)
+                        const message = document.getElementById(this.messages[index]._id)
                         if (message) {
                             message.scrollIntoView()
                         }
@@ -1029,12 +1084,21 @@ export default {
         scrollToBottom() {
             const element = this.$refs.scrollContainer
             if (this.optimizeMethod !== 'none') {
-                this.visiableViewport.tail = this.messages.length
-                this.visiableViewport.head = Math.max(this.messages.length - this.maxViewportLength, 0)
+                this.visibleViewport.tail = this.messages.length
+                this.visibleViewport.head = Math.max(this.messages.length - this.maxViewportLength, 0)
             }
             this.$nextTick(() => {
                 element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
             })
+        },
+        async scrollToLastMessage() {
+            const lastUnreadCount = this.lastUnreadCount
+            if (lastUnreadCount === 0) return
+            const fetchNumber = Math.max(lastUnreadCount - this.messages.length, 0)
+            console.log('Need fetch messages: ', fetchNumber)
+            this.$emit('fetch-messages', false, fetchNumber)
+            this.$emit('clear-last-unread-count')
+            this.scrollingTolastMessage = lastUnreadCount
         },
         onChangeInput() {
             this.keepKeyboardOpen = true
@@ -1135,8 +1199,7 @@ export default {
                 if (!e.target) return
 
                 const bottomScroll = this.getBottomScroll(e.target)
-                if (bottomScroll < 60 && this.visiableViewport.tail === this.messages.length)
-                    this.scrollMessagesCount = 0
+                if (bottomScroll < 60 && this.visibleViewport.tail >= this.messages.length) this.scrollMessagesCount = 0
                 this.scrollIcon = bottomScroll > 500 || this.scrollMessagesCount
 
                 const topScroll = this.getTopScroll(e.target)
@@ -1146,21 +1209,21 @@ export default {
 
                 if (this.optimizeMethod !== 'scroll') return
                 if (topScroll < scrollOffset && scrollDirection <= 0) {
-                    if (this.visiableViewport.head === 0) this.$nextTick(() => this.loadMoreMessages())
+                    if (this.visibleViewport.head === 0) this.$nextTick(() => this.loadMoreMessages())
                     else {
-                        this.visiableViewport.head = Math.max(0, this.visiableViewport.head - 10)
-                        this.visiableViewport.tail = Math.max(
-                            this.visiableViewport.head + this.maxViewportLength,
-                            this.visiableViewport.tail - 10,
+                        this.visibleViewport.head = Math.max(0, this.visibleViewport.head - 10)
+                        this.visibleViewport.tail = Math.max(
+                            this.visibleViewport.head + this.maxViewportLength,
+                            this.visibleViewport.tail - 10,
                         )
                     }
                 }
                 if (bottomScroll < scrollOffset && scrollDirection >= 0) {
-                    this.visiableViewport.tail = Math.min(this.visiableViewport.tail + 10, this.messages.length)
-                    this.visiableViewport.head = Math.max(0, this.visiableViewport.tail - this.maxViewportLength)
+                    this.visibleViewport.tail = Math.min(this.visibleViewport.tail + 10, this.messages.length)
+                    this.visibleViewport.head = Math.max(0, this.visibleViewport.tail - this.maxViewportLength)
                 }
                 if (this.getTopScroll(e.target) <= 0) e.target.scrollTo({ top: 1 })
-                if (this.getBottomScroll(e.target) <= 0 && this.visiableViewport.tail !== this.messages.length)
+                if (this.getBottomScroll(e.target) <= 0 && this.visibleViewport.tail !== this.messages.length)
                     e.target.scrollTo({ top: e.target.scrollHeight - 1 - e.target.clientHeight })
             }, 24)
         },
@@ -1169,19 +1232,19 @@ export default {
             setTimeout(
                 () => {
                     this.infiniteState.head = infiniteState
-                    if (this.loadingHeadMessages && this.visiableViewport.head === 0) return
+                    if (this.loadingHeadMessages && this.visibleViewport.head === 0) return
 
-                    if ((this.messagesLoaded && this.visiableViewport.head === 0) || !this.room.roomId) {
+                    if ((this.messagesLoaded && this.visibleViewport.head === 0) || !this.room.roomId) {
                         return infiniteState.loaded()
                     }
-                    if (this.visiableViewport.head === 0) {
+                    if (this.visibleViewport.head === 0) {
                         this.$emit('fetch-messages')
                         this.loadingHeadMessages = true
                     } else {
-                        this.visiableViewport.head = Math.max(0, this.visiableViewport.head - 10)
-                        this.visiableViewport.tail = Math.max(
-                            this.visiableViewport.head + this.maxViewportLength,
-                            this.visiableViewport.tail - 10,
+                        this.visibleViewport.head = Math.max(0, this.visibleViewport.head - 10)
+                        this.visibleViewport.tail = Math.max(
+                            this.visibleViewport.head + this.maxViewportLength,
+                            this.visibleViewport.tail - 10,
                         )
                         infiniteState.loaded()
                     }
@@ -1191,8 +1254,8 @@ export default {
         },
         loadTailMessages(infiniteState) {
             if (this.optimizeMethod !== 'infinite-loading') return
-            this.visiableViewport.tail = Math.min(this.visiableViewport.tail + 10, this.messages.length)
-            this.visiableViewport.head = Math.max(0, this.visiableViewport.tail - this.maxViewportLength)
+            this.visibleViewport.tail = Math.min(this.visibleViewport.tail + 10, this.messages.length)
+            this.visibleViewport.head = Math.max(0, this.visibleViewport.tail - this.maxViewportLength)
             this.infiniteState.tail = infiniteState
             infiniteState.loaded()
         },
@@ -1289,6 +1352,28 @@ export default {
 
 .vac-infinite-loading {
     height: 68px;
+}
+
+.vac-infinite-loading-bottom {
+    height: 0px;
+}
+
+.vac-icon-last-message {
+    position: absolute;
+    top: 80px;
+    right: 20px;
+    padding: 8px;
+    background: var(--chat-bg-scroll-icon);
+    border-radius: 50%;
+    box-shadow: 0 1px 1px -1px rgba(0, 0, 0, 0.2), 0 1px 1px 0 rgba(0, 0, 0, 0.14), 0 1px 2px 0 rgba(0, 0, 0, 0.12);
+    display: flex;
+    cursor: pointer;
+    z-index: 10;
+
+    svg {
+        height: 25px;
+        width: 25px;
+    }
 }
 
 .vac-icon-scroll {

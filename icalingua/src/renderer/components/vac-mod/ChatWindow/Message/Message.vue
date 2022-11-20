@@ -62,7 +62,8 @@
                             v-if="roomUsers.length > 2 && message.senderId !== currentUserId"
                             class="vac-text-username"
                             :class="{
-                                'vac-username-reply': ((!message.deleted && !message.hide) || message.reveal) && message.replyMessage,
+                                'vac-username-reply':
+                                    ((!message.deleted && !message.hide) || message.reveal) && message.replyMessage,
                             }"
                             style="display: flex"
                         >
@@ -125,6 +126,7 @@
                             :image-hover="imageHover"
                             :showForwardPanel="showForwardPanel"
                             @open-file="openFile"
+                            :hide-chat-image-by-default="hideChatImageByDefault"
                         >
                             <template v-for="(i, name) in $scopedSlots" #[name]="data">
                                 <slot :name="name" v-bind="data" />
@@ -141,6 +143,7 @@
                             :text-formatting="textFormatting"
                             :image-hover="imageHover"
                             :showForwardPanel="showForwardPanel"
+                            :hide-chat-image-by-default="hideChatImageByDefault"
                             @open-file="openFile"
                         >
                             <template v-for="(i, name) in $scopedSlots" #[name]="data">
@@ -247,6 +250,7 @@ export default {
         linkify: { type: Boolean, default: true },
         forwardResId: { type: String, required: false },
         msgstoForward: { type: Array, required: false },
+        hideChatImageByDefault: { type: Boolean, required: true },
     },
 
     data() {
@@ -504,12 +508,12 @@ export default {
 }
 
 .vac-message-clickable {
-	cursor: pointer;
+    cursor: pointer;
 }
 
 .vac-message-selected {
-	background-color: var(--chat-message-bg-color-selected) !important;
-	transition: background-color 0.2s;
+    background-color: var(--chat-message-bg-color-selected) !important;
+    transition: background-color 0.2s;
 }
 
 .vac-icon-deleted {

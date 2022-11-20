@@ -41,6 +41,7 @@ import {
     makeForward,
     pinRoom,
     removeChat,
+    renewMessage,
     renewMessageURL,
     requestGfsToken,
     revealMessage,
@@ -49,9 +50,13 @@ import {
     setRoomAutoDownload,
     setRoomAutoDownloadPath,
     setRoomPriority,
+    sendPacket,
 } from './botAndStorage'
 import { download, downloadFileByMessageData, downloadImage } from './downloadManager'
 import openImage from './openImage'
+
+const requireFunc = eval('require')
+const pb = requireFunc(path.join(getStaticPath(), 'pb.js'))
 
 const setOnlineStatus = (status: OnlineStatusType) => {
     setStatus(status)
@@ -225,6 +230,7 @@ const buildRoomMenu = (room: Room): Menu => {
                     for (const i in cookies) {
                         await win.webContents.session.cookies.set({
                             url: 'https://web.qun.qq.com',
+                            domain: '.qun.qq.com',
                             name: i,
                             value: cookies[i],
                         })
@@ -262,9 +268,7 @@ const buildRoomMenu = (room: Room): Menu => {
                         download(item.getURL(), item.getFilename())
                     })
                     win.loadURL(url)
-                    win.webContents.executeJavaScript(
-                        'window.isAdmin = "' + await isAdmin() + '"',
-                    )
+                    win.webContents.executeJavaScript('window.isAdmin = "' + (await isAdmin()) + '"')
                 },
             }),
         )
@@ -287,6 +291,69 @@ const buildRoomMenu = (room: Room): Menu => {
                         })
                     }
                     await win.loadURL('https://qun.qq.com/interactive/qunhonor?gc=' + -room.roomId)
+                },
+            }),
+        )
+        menu.append(
+            new MenuItem({
+                label: '群相册',
+                async click() {
+                    const size = screen.getPrimaryDisplay().size
+                    const win = newIcalinguaWindow({
+                        height: size.height - 200,
+                        width: 800,
+                        autoHideMenuBar: true,
+                    })
+                    const cookies = await getCookies('qzone.qq.com')
+                    for (const i in cookies) {
+                        await win.webContents.session.cookies.set({
+                            url: 'https://h5.qzone.qq.com',
+                            name: i,
+                            value: cookies[i],
+                        })
+                    }
+                    win.webContents.setWindowOpenHandler((details) => {
+                        console.log(details.url)
+                        const parsedUrl = new URL(details.url)
+                        if (parsedUrl.hostname === 'qungz.photo.store.qq.com') openImage(details.url)
+                        else if (parsedUrl.hostname === 'download.photo.qq.com')
+                            download(
+                                details.url,
+                                `${room.roomName}(${-room.roomId})的群相册${new Date().getTime()}.zip`,
+                            )
+                        return { action: 'deny' }
+                    })
+                    await win.loadURL('https://h5.qzone.qq.com/groupphoto/album?inqq=1&groupId=' + -room.roomId)
+                },
+            }),
+        )
+        menu.append(
+            new MenuItem({
+                label: '群作业',
+                async click() {
+                    const size = screen.getPrimaryDisplay().size
+                    const win = newIcalinguaWindow({
+                        height: size.height - 200,
+                        width: 500,
+                        autoHideMenuBar: true,
+                        title: '群作业',
+                        webPreferences: {
+                            contextIsolation: false,
+                            preload: path.join(getStaticPath(), 'homeworkPreload.js'),
+                        },
+                    })
+                    const cookies = await getCookies('qun.qq.com')
+                    for (const i in cookies) {
+                        await win.webContents.session.cookies.set({
+                            url: 'https://qun.qq.com',
+                            name: i,
+                            value: cookies[i],
+                        })
+                    }
+
+                    await win.loadURL('https://qun.qq.com/homework/p/features#?gid=' + -room.roomId, {
+                        userAgent: 'QQ/8.9.13.9280',
+                    })
                 },
             }),
         )
@@ -766,6 +833,15 @@ export const updateAppMenu = async () => {
                 },
             }),
             new MenuItem({
+                label: '静默获取历史消息',
+                type: 'checkbox',
+                checked: getConfig().silentFetchHistory,
+                click: (menuItem) => {
+                    getConfig().silentFetchHistory = menuItem.checked
+                    saveConfigFile()
+                },
+            }),
+            new MenuItem({
                 label: '启动时检查更新',
                 type: 'checkbox',
                 checked: getConfig().updateCheck === true,
@@ -817,6 +893,17 @@ export const updateAppMenu = async () => {
                     getConfig().sendRawMessage = menuItem.checked
                     saveConfigFile()
                     updateAppMenu()
+                },
+            }),
+            new MenuItem({
+                label: '隐藏聊天图片',
+                type: 'checkbox',
+                checked: getConfig().hideChatImageByDefault,
+                click: (menuItem) => {
+                    getConfig().hideChatImageByDefault = menuItem.checked
+                    saveConfigFile()
+                    ui.message('隐藏聊天图片已' + (menuItem.checked ? '开启' : '关闭'))
+                    ui.setHideChatImageByDefault(menuItem.checked)
                 },
             }),
             new MenuItem({
@@ -886,8 +973,10 @@ export const updateAppMenu = async () => {
                             checked: getConfig().optimizeMethod == 'none',
                             click() {
                                 ui.chroom(0)
-                                ui.message('不建议关闭性能优化，关闭后长时间挂机或浏览历史记录极易导致前端卡死。' 
-                                    + '关闭后若前端卡死，可尝试杀死渲染进程并重新加载，亦可直接重启。')
+                                ui.message(
+                                    '不建议关闭性能优化，关闭后长时间挂机或浏览历史记录极易导致前端卡死。' +
+                                        '关闭后若前端卡死，可尝试杀死渲染进程并重新加载，亦可直接重启。',
+                                )
                                 getConfig().optimizeMethod = 'none'
                                 ui.setOptimizeMethodSetting('none')
                                 saveConfigFile()
@@ -952,7 +1041,7 @@ export const updateAppMenu = async () => {
     if (selectedRoom) {
         menu.append(
             new MenuItem({
-                label: selectedRoom.roomName,
+                label: `${selectedRoom.roomName}(${Math.abs(selectedRoom.roomId)})`,
                 submenu: buildRoomMenu(selectedRoom),
             }),
         )
@@ -1066,6 +1155,17 @@ ipcMain.on('popupMessageMenu', async (_, room: Room, message: Message, sect?: st
                     type: 'normal',
                     click() {
                         clipboard.writeText(message.code)
+                    },
+                }),
+            )
+        }
+        if (message.replyMessage && !history) {
+            menu.append(
+                new MenuItem({
+                    label: '复制回复消息 ID',
+                    type: 'normal',
+                    click: () => {
+                        clipboard.writeText(String(message.replyMessage._id))
                     },
                 }),
             )
@@ -1276,7 +1376,11 @@ ipcMain.on('popupMessageMenu', async (_, room: Room, message: Message, sect?: st
                 },
             }),
         )
-        if ((message.senderId === getUin() || (await isAdmin() && message.role !== 'owner')) && !history && !message.deleted)
+        if (
+            (message.senderId === getUin() || ((await isAdmin()) && message.role !== 'owner')) &&
+            !history &&
+            !message.deleted
+        )
             menu.append(
                 new MenuItem({
                     label: '撤回',
@@ -1298,6 +1402,56 @@ ipcMain.on('popupMessageMenu', async (_, room: Room, message: Message, sect?: st
                     },
                 }),
             )
+        if (await isAdmin() && !history && !message.deleted) {
+            if (room.roomId < 0) {
+                menu.append(
+                    new MenuItem({
+                        label: '设为精华',
+                        click: () => {
+                            const parsed = Buffer.from(message._id as string, "base64")
+                            const seqid = parsed.readUInt32BE(8)
+                            const random = parsed.readUInt32BE(12)
+                            ;(async () => {
+                                const retPacket = await sendPacket('Oidb','OidbSvc.0xeac_1', {
+                                    1: -room.roomId,
+                                    2: seqid,
+                                    3: random,
+                                })
+                                const ret = pb.decode(retPacket)[4]
+                                if (ret[1]) {
+                                    ui.messageError(ret[1].toString())
+                                } else {
+                                    ui.messageSuccess('设置精华成功')
+                                }
+                            })()
+                        },
+                    }),
+                )
+                menu.append(
+                    new MenuItem({
+                        label: '移出精华',
+                        click: () => {
+                            const parsed = Buffer.from(message._id as string, "base64")
+                            const seqid = parsed.readUInt32BE(8)
+                            const random = parsed.readUInt32BE(12)
+                            ;(async () => {
+                                const retPacket = await sendPacket('Oidb','OidbSvc.0xeac_2', {
+                                    1: -room.roomId,
+                                    2: seqid,
+                                    3: random,
+                                })
+                                const ret = pb.decode(retPacket)[4]
+                                if (ret[1]) {
+                                    ui.messageError(ret[1].toString())
+                                } else {
+                                    ui.messageSuccess('移出精华成功')
+                                }
+                            })()
+                        },
+                    }),
+                )
+            }
+        }
         if (!history) {
             menu.append(
                 new MenuItem({
@@ -1354,6 +1508,12 @@ ipcMain.on('popupMessageMenu', async (_, room: Room, message: Message, sect?: st
                 new MenuItem({
                     label: '获取历史消息',
                     click: () => fetchHistory(message._id as string),
+                }),
+            )
+            menu.append(
+                new MenuItem({
+                    label: '重新获取该消息内容',
+                    click: () => renewMessage(room.roomId, message._id as string, message),
                 }),
             )
         }
@@ -1433,6 +1593,13 @@ ipcMain.on('popupStickerItemMenu', (_, itemName: string) => {
             type: 'normal',
             click() {
                 ui.pasteGif(itemName)
+            },
+        })
+        menu.push({
+            label: '查看大图',
+            type: 'normal',
+            click() {
+                openImage(itemName)
             },
         })
         menu.push({
